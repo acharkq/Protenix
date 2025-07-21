@@ -20,6 +20,9 @@ from protenix.config.extend_types import (
     ValueMaybeNone,
 )
 
+
+
+
 basic_configs = {
     "project": RequiredValue(str),
     "run_name": RequiredValue(str),
@@ -29,7 +32,8 @@ basic_configs = {
     "log_interval": RequiredValue(int),
     "checkpoint_interval": -1,
     "eval_first": False,  # run evaluate() before training steps
-    "iters_to_accumulate": 1,
+    "global_batch_size": 64,
+    # "iters_to_accumulate": iters_to_accumulate,
     "finetune_params_with_substring": [
         ""
     ],  # params with substring will be finetuned with different learning rate: finetune_optim_configs["lr"]

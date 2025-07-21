@@ -121,7 +121,7 @@ default_weighted_pdb_configs = {
     },
 }
 
-DATA_ROOT_DIR = os.environ.get("PROTENIX_DATA_ROOT_DIR", "/af3-dev/release_data/")
+DATA_ROOT_DIR = os.environ.get("PROTENIX_DATA_ROOT_DIR", "./bin/af3_dataset/")
 
 # Use CCD cache created by scripts/gen_ccd_cache.py priority. (without date in filename)
 # See: docs/prepare_data.md
@@ -175,8 +175,9 @@ if (not os.path.exists(CCD_COMPONENTS_FILE_PATH)) or (
         )
 
 data_configs = {
-    "num_dl_workers": 16,
+    "num_dl_workers": 8,
     "epoch_size": 10000,
+    "batch_size": 1,
     "train_ref_pos_augment": True,
     "test_ref_pos_augment": True,
     "train_sets": ListValue(["weightedPDB_before2109_wopb_nometalc_0925"]),

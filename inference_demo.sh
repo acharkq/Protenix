@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-export LAYERNORM_TYPE=fast_layernorm
-export USE_DEEPSPEED_EVO_ATTENTION=true
+# export LAYERNORM_TYPE=fast_layernorm
+export USE_DEEPSPEED_EVO_ATTENTION=false
 
 N_sample=5
 N_step=200
@@ -21,7 +21,7 @@ N_cycle=10
 seed=101
 
 input_json_path="./examples/example.json"
-dump_dir="./output"
+dump_dir="./rnatest"
 model_name="protenix_base_default_v0.5.0"
 
 python3 runner/inference.py \

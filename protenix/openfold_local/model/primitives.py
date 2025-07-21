@@ -60,6 +60,7 @@ from protenix.openfold_local.utils.tensor_utils import (
     flatten_final_dims,
     permute_final_dims,
 )
+from protenix.megafold.model.FusedEvoAttention.evoattention import TritonEvoformer
 
 DEFAULT_LMA_Q_CHUNK_SIZE = 1024
 DEFAULT_LMA_KV_CHUNK_SIZE = 4096
@@ -648,16 +649,21 @@ def _deepspeed_evo_attn(
     # Cast to bf16 so kernel can be used during inference
     orig_dtype = q.dtype
     if orig_dtype not in [torch.bfloat16, torch.float16]:
-        o = DS4Sci_EvoformerAttention(
-            q.to(dtype=torch.bfloat16),
-            k.to(dtype=torch.bfloat16),
-            v.to(dtype=torch.bfloat16),
-            [b.to(dtype=torch.bfloat16) for b in biases],
-        )
-
+        if False:
+            o = DS4Sci_EvoformerAttention(
+                q.to(dtype=torch.bfloat16),
+                k.to(dtype=torch.bfloat16),
+                v.to(dtype=torch.bfloat16),
+                [b.to(dtype=torch.bfloat16) for b in biases],
+            )
+        else:
+            o = TritonEvoformer(q.to(dtype=torch.bfloat16), k.to(dtype=torch.bfloat16), v.to(dtype=torch.bfloat16), biases[0].to(dtype=torch.bfloat16), biases[1].to(dtype=torch.bfloat16))
         o = o.to(dtype=orig_dtype)
     else:
-        o = DS4Sci_EvoformerAttention(q, k, v, biases)
+        if False:
+            o = DS4Sci_EvoformerAttention(q, k, v, biases)
+        else:
+            o = TritonEvoformer(q, k, v, biases[0], biases[1])
 
     o = o.reshape(orig_shape)
     return o

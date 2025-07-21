@@ -327,7 +327,7 @@ def get_dataloaders(
         )
         train_dl = DistributedDataLoader(
             dataset=train_dataset,
-            batch_size=1,
+            batch_size=configs.data.batch_size,
             shuffle=False,
             num_workers=configs.data.num_dl_workers,
             collate_fn=collate_fn_first,
@@ -343,7 +343,7 @@ def get_dataloaders(
         )
         train_dl = IterDataLoader(
             dataset=train_dataset,
-            batch_size=1,
+            batch_size=configs.data.batch_size,
             shuffle=False,
             num_workers=configs.data.num_dl_workers,
             collate_fn=collate_fn_first,

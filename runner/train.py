@@ -44,9 +44,14 @@ from protenix.utils.torch_utils import autocasting_disable_decorator, to_device
 from protenix.utils.training import get_optimizer, is_loss_nan_check
 from runner.ema import EMAWrapper
 
+torch.set_float32_matmul_precision('high')
+# torch._dynamo.config.cache_size_limit = 256
+# print(torch._dynamo.config.accumulated_cache_size_limit)
+
 # Disable WANDB's console output capture to reduce unnecessary logging
 os.environ["WANDB_CONSOLE"] = "off"
-
+if os.path.exists('/data/share/liuzhiyuan/cache'):
+    os.environ["TRITON_CACHE_DIR"] = '/data/share/liuzhiyuan/cache'
 
 class AF3Trainer(object):
     def __init__(self, configs):
@@ -59,6 +64,7 @@ class AF3Trainer(object):
         self.init_data()
         self.try_load_checkpoint()
 
+        
     def init_basics(self):
         # Step means effective step considering accumulation
         self.step = 0
@@ -105,6 +111,7 @@ class AF3Trainer(object):
                 name=self.run_name,
                 config=vars(self.configs),
                 id=self.configs.wandb_id or None,
+                settings=wandb.Settings(x_disable_stats=True)
             )
         self.train_metric_wrapper = SimpleMetricAggregator(["avg"])
 
@@ -161,6 +168,10 @@ class AF3Trainer(object):
     def init_model(self):
         self.raw_model = Protenix(self.configs).to(self.device)
         self.use_ddp = False
+        self.compile = False
+        if self.compile:
+            self.raw_model.pairformer_stack = torch.compile(self.raw_model.pairformer_stack, dynamic=True, fullgraph=False)
+            # self.raw_model.diffusion_module = torch.compile(self.raw_model.diffusion_module, dynamic=True, fullgraph=False)
         if DIST_WRAPPER.world_size > 1:
             self.print(f"Using DDP")
             self.use_ddp = True
@@ -260,10 +271,22 @@ class AF3Trainer(object):
                     k[len("module.") :]: v for k, v in checkpoint["model"].items()
                 }
 
-            self.model.load_state_dict(
-                state_dict=checkpoint["model"],
+            state_dict = checkpoint["model"]
+            if self.compile:
+                state_dict = {k.replace('pairformer_stack.', 'pairformer_stack._orig_mod.') if k.startswith('pairformer_stack.') else k: v for k, v in state_dict.items()}
+                state_dict = {k.replace('module.pairformer_stack.', 'module.pairformer_stack._orig_mod.') if k.startswith('module.pairformer_stack.') else k: v for k, v in state_dict.items()}
+
+                # state_dict = {k.replace('diffusion_module.', 'diffusion_module._orig_mod.') if k.startswith('diffusion_module.') else k: v for k, v in state_dict.items()}
+                # state_dict = {k.replace('module.diffusion_module.', 'module.diffusion_module._orig_mod.') if k.startswith('module.diffusion_module.') else k: v for k, v in state_dict.items()}
+
+                
+                
+            output = self.model.load_state_dict(
+                state_dict=state_dict,
                 strict=self.configs.load_strict,
             )
+            print(output)
+
             if not load_params_only:
                 if not skip_load_optimizer:
                     self.print(f"Loading optimizer state")
@@ -482,7 +505,7 @@ class AF3Trainer(object):
             if "loss" not in key:
                 continue
             self.train_metric_wrapper.add(key, value, namespace="train")
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
     def progress_bar(self, desc: str = ""):
         if DIST_WRAPPER.rank != 0:
@@ -518,9 +541,13 @@ class AF3Trainer(object):
                 return
         use_ema = hasattr(self, "ema_wrapper")
         self.print(f"Using ema: {use_ema}")
+        
+        total_io, total_fwd_bwd = 0.0, 0.0
+        count = 0
 
         while True:
             for batch in self.train_dl:
+                t0 = time.perf_counter(); torch.cuda.synchronize()
                 is_update_step = (self.global_step + 1) % self.iters_to_accumulate == 0
                 is_last_step = (self.step + 1) == self.configs.max_steps
                 step_need_log = (self.step + 1) % self.configs.log_interval == 0
@@ -541,7 +568,17 @@ class AF3Trainer(object):
 
                 batch = to_device(batch, self.device)
                 self.progress_bar()
+                t1 = time.perf_counter();  torch.cuda.synchronize()
                 self.train_step(batch)
+                torch.cuda.synchronize()
+                t2 = time.perf_counter()
+                if count >= 1:
+                    total_io      += t0 - t_end
+                    total_fwd_bwd += t2 - t1
+                    print(f"mean IO  : {total_io/count:.4f}s "
+                    f"| mean fwd+bwd : {total_fwd_bwd/count:.4f}s")
+                count += 1
+                
                 if use_ema and is_update_step:
                     self.ema_wrapper.update()
                 if step_need_log or is_last_step:
@@ -558,6 +595,7 @@ class AF3Trainer(object):
                     if self.configs.use_wandb and DIST_WRAPPER.rank == 0:
                         wandb.log(metrics, step=self.step)
 
+                t_end = time.perf_counter()
                 if step_need_save or is_last_step:
                     self.save_checkpoint()
                     if use_ema:
@@ -602,6 +640,10 @@ def main():
 
     print(configs.run_name)
     print(configs)
+    assert configs.global_batch_size % (torch.cuda.device_count() * configs.data.batch_size) == 0
+    configs.iters_to_accumulate = int(configs.global_batch_size // torch.cuda.device_count() // configs.data.batch_size)
+    print('iters_to_accumulate', configs.iters_to_accumulate)
+
     trainer = AF3Trainer(configs)
     trainer.run()
 

@@ -61,6 +61,7 @@ class Protenix(nn.Module):
         self.N_cycle = self.configs.model.N_cycle
         self.N_model_seed = self.configs.model.N_model_seed
         self.train_confidence_only = configs.train_confidence_only
+        self.not_train_confidence = True
         if self.train_confidence_only:  # the final finetune stage
             assert configs.loss.weight.alpha_diffusion == 0.0
             assert configs.loss.weight.alpha_distogram == 0.0
@@ -558,12 +559,22 @@ class Protenix(nn.Module):
         else:
             deepspeed_evo_attention_condition_satisfy = True
 
-        s_inputs, s, z = self.get_pairformer_output(
-            input_feature_dict=input_feature_dict,
-            N_cycle=N_cycle,
-            inplace_safe=inplace_safe,
-            chunk_size=chunk_size,
-        )
+        if False:
+            s_inputs, s, z = self.get_pairformer_output(
+                input_feature_dict=input_feature_dict,
+                N_cycle=N_cycle,
+                inplace_safe=inplace_safe,
+                chunk_size=chunk_size,
+            )
+        else:
+            with torch.no_grad():
+                s_inputs, s, z = self.get_pairformer_output(
+                    input_feature_dict=input_feature_dict,
+                    N_cycle=N_cycle,
+                    inplace_safe=inplace_safe,
+                    chunk_size=chunk_size,
+                )
+                s_inputs, s, z = s_inputs.detach(), s.detach(), z.detach()
 
         log_dict = {}
         pred_dict = {}
@@ -607,29 +618,30 @@ class Protenix(nn.Module):
         drop_embedding = (
             random.random() < self.configs.model.confidence_embedding_drop_rate
         )
-        plddt_pred, pae_pred, pde_pred, resolved_pred = self.run_confidence_head(
-            input_feature_dict=input_feature_dict,
-            s_inputs=s_inputs,
-            s_trunk=s,
-            z_trunk=z,
-            pair_mask=None,
-            x_pred_coords=coordinate_mini,
-            use_embedding=not drop_embedding,
-            use_memory_efficient_kernel=self.configs.use_memory_efficient_kernel,
-            use_deepspeed_evo_attention=self.configs.use_deepspeed_evo_attention
-            and deepspeed_evo_attention_condition_satisfy,
-            use_lma=self.configs.use_lma,
-            inplace_safe=inplace_safe,
-            chunk_size=chunk_size,
-        )
-        pred_dict.update(
-            {
-                "plddt": plddt_pred,
-                "pae": pae_pred,
-                "pde": pde_pred,
-                "resolved": resolved_pred,
-            }
-        )
+        if not self.not_train_confidence:
+            plddt_pred, pae_pred, pde_pred, resolved_pred = self.run_confidence_head(
+                input_feature_dict=input_feature_dict,
+                s_inputs=s_inputs,
+                s_trunk=s,
+                z_trunk=z,
+                pair_mask=None,
+                x_pred_coords=coordinate_mini,
+                use_embedding=not drop_embedding,
+                use_memory_efficient_kernel=self.configs.use_memory_efficient_kernel,
+                use_deepspeed_evo_attention=self.configs.use_deepspeed_evo_attention
+                and deepspeed_evo_attention_condition_satisfy,
+                use_lma=self.configs.use_lma,
+                inplace_safe=inplace_safe,
+                chunk_size=chunk_size,
+            )
+            pred_dict.update(
+                {
+                    "plddt": plddt_pred,
+                    "pae": pae_pred,
+                    "pde": pde_pred,
+                    "resolved": resolved_pred,
+                }
+            )
 
         if self.train_confidence_only:
             # Skip diffusion loss and distogram loss. Return now.

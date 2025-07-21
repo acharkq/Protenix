@@ -248,6 +248,7 @@ class BaseSingleDataset(Dataset):
         """
         if self.name:
             logger.info("-" * 10 + f" Dataset {self.name}" + "-" * 10)
+
         df["mol_group_type"] = df.apply(
             lambda row: "_".join(
                 sorted(
