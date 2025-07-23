@@ -944,6 +944,7 @@ class AtomAttentionDecoder(nn.Module):
         n_queries: int = 32,
         n_keys: int = 128,
         blocks_per_ckpt: Optional[int] = None,
+        use_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -978,6 +979,7 @@ class AtomAttentionDecoder(nn.Module):
             n_queries=n_queries,
             n_keys=n_keys,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_relational_attention,
         )
 
     def forward(
