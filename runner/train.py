@@ -50,6 +50,7 @@ torch.set_float32_matmul_precision('high')
 
 # Disable WANDB's console output capture to reduce unnecessary logging
 os.environ["WANDB_CONSOLE"] = "off"
+os.environ["WANDB__SERVICE_WAIT"] = "300"
 if os.path.exists('/data/share/liuzhiyuan/cache'):
     os.environ["TRITON_CACHE_DIR"] = '/data/share/liuzhiyuan/cache'
 
@@ -547,7 +548,8 @@ class AF3Trainer(object):
 
         while True:
             for batch in self.train_dl:
-                t0 = time.perf_counter(); torch.cuda.synchronize()
+                if self.configs.test_speed:
+                    t0 = time.perf_counter(); torch.cuda.synchronize()
                 is_update_step = (self.global_step + 1) % self.iters_to_accumulate == 0
                 is_last_step = (self.step + 1) == self.configs.max_steps
                 step_need_log = (self.step + 1) % self.configs.log_interval == 0
@@ -568,16 +570,22 @@ class AF3Trainer(object):
 
                 batch = to_device(batch, self.device)
                 self.progress_bar()
-                t1 = time.perf_counter();  torch.cuda.synchronize()
+                
+                if self.configs.test_speed:
+                    t1 = time.perf_counter();  torch.cuda.synchronize()
+
                 self.train_step(batch)
-                torch.cuda.synchronize()
-                t2 = time.perf_counter()
-                if count >= 1:
-                    total_io      += t0 - t_end
-                    total_fwd_bwd += t2 - t1
-                    print(f"mean IO  : {total_io/count:.4f}s "
-                    f"| mean fwd+bwd : {total_fwd_bwd/count:.4f}s")
-                count += 1
+                
+                if self.configs.test_speed:
+                    torch.cuda.synchronize()
+                    t2 = time.perf_counter()
+
+                    if count >= 1:
+                        total_io      += t0 - t_end
+                        total_fwd_bwd += t2 - t1
+                        print(f"mean IO  : {total_io/count:.4f}s "
+                        f"| mean fwd+bwd : {total_fwd_bwd/count:.4f}s")
+                    count += 1
                 
                 if use_ema and is_update_step:
                     self.ema_wrapper.update()
@@ -594,8 +602,9 @@ class AF3Trainer(object):
                         self.print(f"Step {self.step}, lr: {last_lr}")
                     if self.configs.use_wandb and DIST_WRAPPER.rank == 0:
                         wandb.log(metrics, step=self.step)
-
-                t_end = time.perf_counter()
+                
+                if self.configs.test_speed:
+                    t_end = time.perf_counter()
                 if step_need_save or is_last_step:
                     self.save_checkpoint()
                     if use_ema:

@@ -27,6 +27,7 @@ basic_configs = {
     "project": RequiredValue(str),
     "run_name": RequiredValue(str),
     "base_dir": RequiredValue(str),
+    "test_speed": False,
     # training
     "eval_interval": RequiredValue(int),
     "log_interval": RequiredValue(int),

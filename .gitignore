@@ -139,3 +139,4 @@ release_data/
 af3_dataset
 dataset
 bin
+slurm_log

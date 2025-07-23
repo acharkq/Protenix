@@ -175,7 +175,7 @@ if (not os.path.exists(CCD_COMPONENTS_FILE_PATH)) or (
         )
 
 data_configs = {
-    "num_dl_workers": 8,
+    "num_dl_workers": 12,
     "epoch_size": 10000,
     "batch_size": 1,
     "train_ref_pos_augment": True,
