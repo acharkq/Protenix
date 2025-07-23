@@ -15,29 +15,35 @@ from functools import partial
 import importlib
 from typing import Any, List, Callable, Optional
 
-deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
-if deepspeed_is_installed:
-    import deepspeed
+# deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
+# if deepspeed_is_installed:
+#     import deepspeed
 
 import torch
-import torch.utils.checkpoint
+# import torch.utils.checkpoint
 
 
 BLOCK_ARG = Any
 BLOCK_ARGS = List[BLOCK_ARG]
 
 
+# def get_checkpoint_fn():
+#     deepspeed_is_configured = (
+#         deepspeed_is_installed and deepspeed.checkpointing.is_configured()
+#     )
+#     if deepspeed_is_configured:
+#         checkpoint = deepspeed.checkpointing.checkpoint
+#     else:
+#         checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+
+#     return checkpoint
+
+
 def get_checkpoint_fn():
-    deepspeed_is_configured = (
-        deepspeed_is_installed and deepspeed.checkpointing.is_configured()
-    )
-    if deepspeed_is_configured:
-        checkpoint = deepspeed.checkpointing.checkpoint
-    else:
-        checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
-
-    return checkpoint
-
+    def no_op_checkpoint(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    
+    return no_op_checkpoint
 
 @torch.jit.ignore
 def checkpoint_blocks(
