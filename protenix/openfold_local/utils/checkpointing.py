@@ -38,12 +38,16 @@ BLOCK_ARGS = List[BLOCK_ARG]
 
 #     return checkpoint
 
-
 def get_checkpoint_fn():
-    def no_op_checkpoint(function, *args, **kwargs):
-        return function(*args, **kwargs)
+    checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+    return checkpoint
+
+
+# def get_checkpoint_fn():
+#     def no_op_checkpoint(function, *args, **kwargs):
+#         return function(*args, **kwargs)
     
-    return no_op_checkpoint
+#     return no_op_checkpoint
 
 @torch.jit.ignore
 def checkpoint_blocks(
