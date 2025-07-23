@@ -206,9 +206,10 @@ class Linear(nn.Linear):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         d = input.dtype
-        deepspeed_is_initialized = (
-            deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
-        )
+        # deepspeed_is_initialized = (
+        #     deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
+        # )
+        deepspeed_is_initialized = False
         if self.precision is not None:
             with torch.amp.autocast('cuda', enabled=False):
                 bias = (
@@ -256,9 +257,10 @@ class OpenFoldLayerNorm(nn.Module):
 
     def forward(self, x):
         d = x.dtype
-        deepspeed_is_initialized = (
-            deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
-        )
+        # deepspeed_is_initialized = (
+        #     deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
+        # )
+        deepspeed_is_initialized = False
         if d is torch.bfloat16 and not deepspeed_is_initialized:
             with torch.amp.autocast('cuda', enabled=False):
                 out = nn.functional.layer_norm(
@@ -304,9 +306,10 @@ def softmax_no_cast(t: torch.Tensor, dim: int = -1) -> torch.Tensor:
     type bfloat16
     """
     d = t.dtype
-    deepspeed_is_initialized = (
-        deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
-    )
+    # deepspeed_is_initialized = (
+    #     deepspeed_is_installed and deepspeed.comm.comm.is_initialized()
+    # )
+    deepspeed_is_initialized = False
     if d is torch.bfloat16 and not deepspeed_is_initialized:
         with torch.amp.autocast('cuda', enabled=False):
             s = torch.nn.functional.softmax(t, dim=dim)

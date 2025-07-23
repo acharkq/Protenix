@@ -317,6 +317,7 @@ def get_dataloaders(
 
     """
     train_dataset, test_datasets = get_datasets(configs, error_dir)
+    print('world size', world_size)
     if world_size > 1:
         train_sampler = DistributedWeightedSampler(
             train_dataset,
