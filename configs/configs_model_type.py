@@ -135,6 +135,8 @@ model_configs = {
                 "atom_decoder": {
                     "n_blocks": 1,
                 },
+                "use_atom_relational_attention": False,
+                "use_token_relational_attention": False
             },
         },
         "load_strict": False,  # For inference, it should be True.
@@ -163,6 +165,8 @@ model_configs = {
                 "atom_decoder": {
                     "n_blocks": 1,
                 },
+                "use_atom_relational_attention": False,
+                "use_token_relational_attention": False
             },
         },
         "load_strict": False,  # For inference, it should be True.
@@ -191,6 +195,8 @@ model_configs = {
                 "atom_decoder": {
                     "n_blocks": 1,
                 },
+                "use_atom_relational_attention": False,
+                "use_token_relational_attention": False
             },
         },
         "esm": {
@@ -224,6 +230,8 @@ model_configs = {
                 "atom_decoder": {
                     "n_blocks": 1,
                 },
+                "use_atom_relational_attention": False,
+                "use_token_relational_attention": False
             },
         },
         "esm": {

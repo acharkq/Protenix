@@ -288,6 +288,52 @@ def _attention(
     return attn_output
 
 
+def _relational_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    inplace_safe: bool = False,
+) -> torch.Tensor:
+    """Attention.
+
+    Args:
+        q (torch.Tensor): query tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        k (torch.Tensor): key tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        v (torch.Tensor): value tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        attn_bias (torch.Tensor, optional): attention bias tensor of shape [1, H, seq_len, seq_len]. Defaults to None.
+        use_efficient_implementation (bool): whether to use the torch.nn.functional.scaled_dot_product_attention, Defaults to False.
+
+    Returns:
+        torch.Tensor: output of tensor [..., n_q, d]
+    """
+    assert k.shape == v.shape
+
+    # Upcast to compute attn_weights
+    input_dtype = q.dtype
+    q = q.to(dtype=torch.float32)
+    k = k.to(dtype=torch.float32)
+    if attn_bias is not None:
+        attn_bias = attn_bias.to(dtype=torch.float32)
+
+    with torch.amp.autocast('cuda', enabled=False):
+        # [1, seq_len, H, seq_len, C_hidden] [1, seq_len, H, seq_len, C_hidden] --> [1, seq_len, H, seq_len] --> [1, H, seq_len, seq_len]
+        attn_weights = (q * k).sum(dim=-1).transpose(-2,-3) ## attn_weights_ij = (q_ij * k_ij).sum(dim=-1)
+
+        if attn_bias is not None:
+            if inplace_safe:
+                attn_weights += attn_bias
+            else:
+                attn_weights = attn_weights + attn_bias
+
+        # [1, H, seq_len, seq_len, 1]
+        attn_weights = F.softmax(attn_weights, dim=-1).usqueeze(-1)
+
+    # [1, H, seq_len, seq_len, 1], [1, seq_len, H, seq_len, C_hidden] -> [1, H, seq_len, C_hidden]
+    attn_output = (attn_weights.to(dtype=input_dtype) * v.transpose(-3,-4)).sum(dim=-2)
+
+    return attn_output
+
 def rearrange_qk_to_dense_trunk(
     q: Union[torch.Tensor, list[torch.Tensor]],
     k: Union[torch.Tensor, list[torch.Tensor]],
@@ -640,6 +686,8 @@ class Attention(nn.Module):
         local_attention_method: str = "global_attention_with_bias",
         use_efficient_implementation: bool = False,
         zero_init: bool = True,
+        c_z: int = None,
+        use_relational_attention: bool = False,
     ) -> None:
         """
 
@@ -674,11 +722,13 @@ class Attention(nn.Module):
         self.c_q = c_q
         self.c_k = c_k
         self.c_v = c_v
+        self.c_z = c_z
         self.c_hidden = c_hidden
         self.num_heads = num_heads
         self.gating = gating
         self.local_attention_method = local_attention_method
         self.use_efficient_implementation = use_efficient_implementation
+        self.use_relational_attention = use_relational_attention
 
         # DISCREPANCY: c_hidden is not the per-head channel dimension, as
         # stated in the supplement, but the overall channel dimension.
@@ -704,6 +754,15 @@ class Attention(nn.Module):
         if self.zero_init:
             # zero init the output layer
             nn.init.zeros_(self.linear_o.weight)
+
+        if self.use_relational_attention:
+            self.linear_qz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)
+            self.linear_kz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)
+            self.linear_vz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)
+            nn.init.zeros_(self.linear_qz.weight)
+            nn.init.zeros_(self.linear_kz.weight)
+            nn.init.zeros_(self.linear_vz.weight)
+
 
     def _prep_qkv(
         self, q_x: torch.Tensor, kv_x: torch.Tensor, apply_scale: bool = True
@@ -733,6 +792,50 @@ class Attention(nn.Module):
         v = v.view(v.shape[:-1] + (self.num_heads, -1))
 
         # [*, H, Q/K/V, C_hidden]
+        q = q.transpose(-2, -3)
+        k = k.transpose(-2, -3)
+        v = v.transpose(-2, -3)
+
+        if apply_scale:
+            q = q / math.sqrt(self.c_hidden)
+
+        return q, k, v
+    
+    def _prep_qkvz(
+        self, q_x: torch.Tensor, kv_x: torch.Tensor, z: torch.Tensor, apply_scale: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Prepare qkv
+
+        Args:
+            q_x (torch.Tensor): the input x for q
+                [1, seq_len, c_q]
+            kv_x (torch.Tensor): the input x for kv
+                [1, seq_len, c_k]
+                [1, seq_len, c_v]
+            z (torch.Tensor): the input z
+                [1, seq_len, seq_len, c_z]
+            apply_scale (bool, optional): apply scale to dot product qk. Defaults to True.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]: the return q/k/v
+                # [..., H, Q/K/V, C_hidden]
+        """
+        # [1, seq_len, H * C_hidden]
+        q = self.linear_q(q_x)
+        k = self.linear_k(kv_x)
+        v = self.linear_v(kv_x)
+
+        # add pair representation; [1, seq_len, seq_len, H * C_hidden]
+        q = q.unsqueeze(dim=2) + self.linear_qz(z) # q_ij = linear([q_i, z_ij])
+        k = k.unsqueeze(dim=1) + self.linear_kz(z) # k_ij = linear([k_j + z_ij])
+        v = v.unsqueeze(dim=1) + self.linear_vz(z) # v_ij = linear([v_j + z_ij])
+
+        # [1, seq_len, seq_len, H, C_hidden]
+        q = q.view(q.shape[:-1] + (self.num_heads, -1))
+        k = k.view(k.shape[:-1] + (self.num_heads, -1))
+        v = v.view(v.shape[:-1] + (self.num_heads, -1))
+
+        # [1, seq_len, H, seq_len, C_hidden]
         q = q.transpose(-2, -3)
         k = k.transpose(-2, -3)
         v = v.transpose(-2, -3)
@@ -780,6 +883,7 @@ class Attention(nn.Module):
         inf: Optional[float] = 1e10,
         inplace_safe: bool = False,
         chunk_size: Optional[int] = None,
+        z: torch.Tensor = None,
     ) -> torch.Tensor:
         """
 
@@ -799,6 +903,14 @@ class Attention(nn.Module):
             torch.Tensor: attention update
                 [*, Q, C_q]
         """
+        if self.use_relational_attention:
+            seq_len = q_x.shape[0]
+            q, k, v = self._prep_qkvz(q_x=q_x, kv_x=kv_x, z=z, apply_scale=True) # shape = [1, seq_len, H, seq_len, C_hidden]
+            assert attn_bias is not None and attn_bias.shape == (1, self.num_heads, seq_len, seq_len)
+            o = _relational_attention(q=q,k=k,v=v,inplace_safe=inplace_safe) # shape = [1, H, seq_len, C_hidden]
+            o = o.transpose(-2, -3)  # o: [1, seq_len, H, C_hidden]
+            o = self._wrap_up(o, q_x)  # q_x: [1, Q, c_q]
+            return o
 
         q, k, v = self._prep_qkv(q_x=q_x, kv_x=kv_x, apply_scale=True)
 
@@ -825,6 +937,7 @@ class Attention(nn.Module):
 
         if n_queries and n_keys:
             if self.local_attention_method == "global_attention_with_bias":
+                assert False
                 local_attn_bias = create_local_attn_bias(
                     q.shape[-2], n_queries, n_keys, inf=inf, device=q.device
                 )

@@ -59,6 +59,7 @@ class PairformerBlock(nn.Module):
         c_hidden_pair_att: int = 32,
         no_heads_pair: int = 4,
         dropout: float = 0.25,
+        use_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -92,7 +93,7 @@ class PairformerBlock(nn.Module):
         self.c_s = c_s
         if self.c_s > 0:
             self.attention_pair_bias = AttentionPairBias(
-                has_s=False, create_offset_ln_z=True, n_heads=n_heads, c_a=c_s, c_z=c_z
+                has_s=False, create_offset_ln_z=True, n_heads=n_heads, c_a=c_s, c_z=c_z, use_relational_attention=use_relational_attention
             )
             self.single_transition = Transition(c_in=c_s, n=4)
 

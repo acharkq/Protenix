@@ -230,6 +230,8 @@ class DiffusionModule(nn.Module):
         drop_path_rate: float = 0.0,
         blocks_per_ckpt: Optional[int] = None,
         use_fine_grained_checkpoint: bool = False,
+        use_atom_relational_attention: bool = False,
+        use_token_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -275,6 +277,7 @@ class DiffusionModule(nn.Module):
             c_s=c_s,
             c_z=c_z,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_atom_relational_attention,
         )
         # Alg20: line4
         self.layernorm_s = LayerNorm(c_s, create_offset=False)
@@ -290,6 +293,7 @@ class DiffusionModule(nn.Module):
             c_s=c_s,
             c_z=c_z,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_token_relational_attention,
         )
         self.layernorm_a = LayerNorm(c_token, create_offset=False)
         self.atom_attention_decoder = AtomAttentionDecoder(
@@ -298,6 +302,7 @@ class DiffusionModule(nn.Module):
             c_atom=c_atom,
             c_atompair=c_atompair,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_atom_relational_attention,
         )
 
     def f_forward(

@@ -52,6 +52,7 @@ class AttentionPairBias(nn.Module):
         c_z: int = 128,
         biasinit: float = -2.0,
         cross_attention_mode: bool = False,
+        use_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -93,6 +94,7 @@ class AttentionPairBias(nn.Module):
             q_linear_bias=True,
             local_attention_method=self.local_attention_method,
             zero_init=not self.has_s,  # Adaptive zero init
+            use_relational_attention=use_relational_attention,
         )
         self.layernorm_z = LayerNorm(c_z, create_offset=self.create_offset_ln_z)
         # Alg24. Line8 is scalar, but this is different for different heads
@@ -149,6 +151,7 @@ class AttentionPairBias(nn.Module):
         q = self.attention(
             q_x=q,
             kv_x=kv,
+            z=z,
             trunked_attn_bias=bias,
             n_queries=n_queries,
             n_keys=n_keys,
@@ -185,7 +188,7 @@ class AttentionPairBias(nn.Module):
         bias = permute_final_dims(bias, [2, 0, 1])  # [..., n_heads, N_token, N_token]
 
         # Line 11: Multi-head attention with attention bias & gating (and optionally local attention)
-        q = self.attention(q_x=q, kv_x=kv, attn_bias=bias, inplace_safe=inplace_safe)
+        q = self.attention(q_x=q, kv_x=kv, z=z, attn_bias=bias, inplace_safe=inplace_safe)
 
         return q
 
@@ -257,6 +260,7 @@ class DiffusionTransformerBlock(nn.Module):
         biasinit: float = -2.0,
         drop_path_rate: float = 0.0,
         cross_attention_mode: bool = False,
+        use_relational_attention: bool = False
     ) -> None:
         """
         Args:
@@ -279,6 +283,7 @@ class DiffusionTransformerBlock(nn.Module):
             c_z=c_z,
             biasinit=biasinit,
             cross_attention_mode=cross_attention_mode,
+            use_relational_attention=use_relational_attention
         )
         self.conditioned_transition_block = ConditionedTransitionBlock(
             n=2, c_a=c_a, c_s=c_s, biasinit=biasinit
@@ -350,6 +355,7 @@ class DiffusionTransformer(nn.Module):
         cross_attention_mode: bool = False,
         drop_path_rate: float = 0.0,  # drop skip connection path
         blocks_per_ckpt: Optional[int] = None,
+        use_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -381,6 +387,7 @@ class DiffusionTransformer(nn.Module):
                 c_z=c_z,
                 cross_attention_mode=cross_attention_mode,
                 drop_path_rate=drop_path_rates[i],
+                use_relational_attention=use_relational_attention,
             )
             self.blocks.append(block)
 
@@ -471,6 +478,7 @@ class AtomTransformer(nn.Module):
         n_queries: int = 32,
         n_keys: int = 128,
         blocks_per_ckpt: Optional[int] = None,
+        use_relational_attention: bool = False,
     ) -> None:
         """Performs local transformer among atom embeddings, with bias predicted from atom pair embeddings
 
@@ -501,6 +509,7 @@ class AtomTransformer(nn.Module):
             c_z=c_atompair,
             cross_attention_mode=True,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_relational_attention,
         )
 
     def forward(
@@ -604,6 +613,7 @@ class AtomAttentionEncoder(nn.Module):
         n_queries: int = 32,
         n_keys: int = 128,
         blocks_per_ckpt: Optional[int] = None,
+        use_relational_attention: bool = False,
     ) -> None:
         """
         Args:
@@ -714,6 +724,7 @@ class AtomAttentionEncoder(nn.Module):
             n_queries=n_queries,
             n_keys=n_keys,
             blocks_per_ckpt=blocks_per_ckpt,
+            use_relational_attention=use_relational_attention,
         )
         self.linear_no_bias_q = LinearNoBias(
             in_features=self.c_atom, out_features=self.c_token
