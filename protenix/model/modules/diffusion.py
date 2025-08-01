@@ -253,6 +253,7 @@ class DiffusionModule(nn.Module):
         """
 
         super(DiffusionModule, self).__init__()
+        import pdb; pdb.set_trace()
         self.sigma_data = sigma_data
         self.c_atom = c_atom
         self.c_atompair = c_atompair

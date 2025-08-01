@@ -186,3 +186,27 @@ def get_lr_scheduler(
     else:
         raise ValueError(f"Invalid lr scheduler: [{configs.lr_scheduler}]")
     return lr_scheduler
+
+
+class RelWarmupSchedulerWrapper(object):
+    def __init__(self, scheduler, warmup_steps, lr=0.001):
+        self.scheduler = scheduler
+        self.warmup_steps = warmup_steps
+        self.cur_step = 0
+        self.lr = lr
+    
+    def get_lr(self, ):
+        if self.cur_step <= self.warmup_steps:
+            format_lr = self.scheduler.get_lr()
+            if isinstance(format_lr, list):
+                return [self.lr] * len(format_lr)
+            elif isinstance(format_lr, float):
+                return self.lr
+            else:
+                raise ValueError(f"Invalid lr format: {format_lr}")
+        return self.scheduler.get_lr()
+    
+    def step(self):
+        self.cur_step += 1
+        if self.cur_step >= self.warmup_steps:
+            self.scheduler.step()

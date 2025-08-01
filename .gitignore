@@ -140,3 +140,4 @@ af3_dataset
 dataset
 bin
 slurm_log
+slurm_log_rel

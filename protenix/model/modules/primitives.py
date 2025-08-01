@@ -756,6 +756,8 @@ class Attention(nn.Module):
             nn.init.zeros_(self.linear_o.weight)
 
         if self.use_relational_attention:
+            print('---------------------------------------------')
+            print('use_relational_attention')
             self.linear_qz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)
             self.linear_kz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)
             self.linear_vz = LinearNoBias(self.c_z, self.c_hidden * self.num_heads)

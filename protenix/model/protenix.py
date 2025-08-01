@@ -18,9 +18,11 @@ from typing import Any, Optional
 
 import numpy as np
 import torch
+import torch.multiprocessing as mp
 import torch.nn as nn
 
 from protenix.model import sample_confidence
+
 from protenix.model.generator import (
     InferenceNoiseScheduler,
     TrainingNoiseSampler,

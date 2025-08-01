@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import torch
+import torch.multiprocessing as mp
+mp.set_start_method("fork", force=True)
 
 import datetime
 import hashlib
@@ -19,13 +22,11 @@ import os
 import time
 from contextlib import nullcontext
 
-import torch
 import torch.distributed as dist
 import wandb
 from ml_collections.config_dict import ConfigDict
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
-
 from configs.configs_base import configs as configs_base
 from configs.configs_data import data_configs
 from configs.configs_model_type import model_configs
@@ -36,13 +37,14 @@ from protenix.metrics.lddt_metrics import LDDTMetrics
 from protenix.model.loss import ProtenixLoss
 from protenix.model.protenix import Protenix
 from protenix.utils.distributed import DIST_WRAPPER
-from protenix.utils.lr_scheduler import FinetuneLRScheduler, get_lr_scheduler
+from protenix.utils.lr_scheduler import FinetuneLRScheduler, get_lr_scheduler, RelWarmupSchedulerWrapper
 from protenix.utils.metrics import SimpleMetricAggregator
 from protenix.utils.permutation.permutation import SymmetricPermutation
 from protenix.utils.seed import seed_everything
 from protenix.utils.torch_utils import autocasting_disable_decorator, to_device
 from protenix.utils.training import get_optimizer, is_loss_nan_check
 from runner.ema import EMAWrapper
+print('Finished Importing')
 
 torch.set_float32_matmul_precision('high')
 # torch._dynamo.config.cache_size_limit = 256
@@ -53,6 +55,14 @@ os.environ["WANDB_CONSOLE"] = "off"
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 if os.path.exists('/data/share/liuzhiyuan/cache'):
     os.environ["TRITON_CACHE_DIR"] = '/data/share/liuzhiyuan/cache'
+print('Finished Setup OS ')
+
+
+print("PID:", os.getpid(),
+      "RANK:", os.environ.get("RANK"),
+      "LOCAL_RANK:", os.environ.get("LOCAL_RANK"),
+      "DL_WORKER:", os.environ.get("DATASET_WORKER_ID"),
+      "START_METHOD:", mp.get_start_method() if mp.get_start_method() else None)
 
 class AF3Trainer(object):
     def __init__(self, configs):
@@ -223,6 +233,9 @@ class AF3Trainer(object):
             )
         else:
             self.lr_scheduler = get_lr_scheduler(self.configs, self.optimizer, **kwargs)
+
+        if self.configs.rel_warmup_steps > 0:
+            self.lr_scheduler = RelWarmupSchedulerWrapper(self.lr_scheduler, self.configs.rel_warmup_steps, self.configs.lr)
 
     def init_data(self):
         self.train_dl, self.test_dls = get_dataloaders(
@@ -506,7 +519,8 @@ class AF3Trainer(object):
             if "loss" not in key:
                 continue
             self.train_metric_wrapper.add(key, value, namespace="train")
-        # torch.cuda.empty_cache()
+        if self.global_step % 10 == 0:
+            torch.cuda.empty_cache()
 
     def progress_bar(self, desc: str = ""):
         if DIST_WRAPPER.rank != 0:
@@ -625,6 +639,120 @@ class AF3Trainer(object):
             if self.step >= self.configs.max_steps:
                 break
 
+    
+    def warmup_run(self):
+        """
+        Main entry for the AF3Trainer.
+
+        This function handles the training process, evaluation, logging, and checkpoint saving.
+        """
+        if self.configs.eval_only or self.configs.eval_first:
+            self.evaluate()
+            if self.configs.eval_only:
+                return
+        use_ema = hasattr(self, "ema_wrapper")
+        self.print(f"Using ema: {use_ema}")
+        
+        total_io, total_fwd_bwd = 0.0, 0.0
+        count = 0
+
+        # Fix all model parameters except linear_qz, linear_kz, linear_vz
+        for name, param in self.model.named_parameters():
+            
+            if not any(x in name for x in ['linear_qz', 'linear_kz', 'linear_vz']):
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+            print(name, param.requires_grad)
+        # Print trainable parameters
+        print("\nTrainable parameters:")
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                print(f"{name}: {param.shape}")
+        print() # Empty line for readability
+
+        while True:
+            print('before dl')
+            for batch in self.train_dl:
+                if self.configs.test_speed:
+                    t0 = time.perf_counter(); torch.cuda.synchronize()
+                is_update_step = (self.global_step + 1) % self.iters_to_accumulate == 0
+                is_last_step = (self.step + 1) == self.configs.max_steps
+                step_need_log = (self.step + 1) % self.configs.log_interval == 0
+
+                step_need_eval = (
+                    self.configs.eval_interval > 0
+                    and (self.step + 1) % self.configs.eval_interval == 0
+                )
+                step_need_save = (
+                    self.configs.checkpoint_interval > 0
+                    and (self.step + 1) % self.configs.checkpoint_interval == 0
+                )
+
+                is_last_step &= is_update_step
+                step_need_log &= is_update_step
+                step_need_eval &= is_update_step
+                step_need_save &= is_update_step
+
+                batch = to_device(batch, self.device)
+                self.progress_bar()
+                
+                if self.configs.test_speed:
+                    t1 = time.perf_counter();  torch.cuda.synchronize()
+
+                self.train_step(batch)
+                
+                if self.configs.test_speed:
+                    torch.cuda.synchronize()
+                    t2 = time.perf_counter()
+
+                    if count >= 1:
+                        total_io      += t0 - t_end
+                        total_fwd_bwd += t2 - t1
+                        print(f"mean IO  : {total_io/count:.4f}s "
+                        f"| mean fwd+bwd : {total_fwd_bwd/count:.4f}s")
+                    count += 1
+                
+                if use_ema and is_update_step:
+                    self.ema_wrapper.update()
+                if step_need_log or is_last_step:
+                    metrics = self.train_metric_wrapper.calc()
+                    self.print(f"Step {self.step} train: {metrics}")
+                    last_lr = self.lr_scheduler.get_last_lr()
+                    if DIST_WRAPPER.rank == 0:
+                        if self.configs.use_wandb:
+                            lr_dict = {"train/lr": last_lr[0]}
+                            for group_i, group_lr in enumerate(last_lr):
+                                lr_dict[f"train/group{group_i}_lr"] = group_lr
+                            wandb.log(lr_dict, step=self.step)
+                        self.print(f"Step {self.step}, lr: {last_lr}")
+                    if self.configs.use_wandb and DIST_WRAPPER.rank == 0:
+                        wandb.log(metrics, step=self.step)
+                
+                if self.configs.test_speed:
+                    t_end = time.perf_counter()
+                if step_need_save or is_last_step:
+                    self.save_checkpoint()
+                    if use_ema:
+                        self.ema_wrapper.apply_shadow()
+                        self.save_checkpoint(
+                            ema_suffix=f"_ema_{self.ema_wrapper.decay}"
+                        )
+                        self.ema_wrapper.restore()
+
+                if step_need_eval or is_last_step:
+                    self.evaluate()
+                self.global_step += 1
+                if self.global_step % self.iters_to_accumulate == 0:
+                    self.step += 1
+                if self.step >= self.configs.rel_warmup_steps:
+                    self.print(f"Finish warmup training after {self.step} steps")
+                    break
+            if self.step >= self.configs.rel_warmup_steps:
+                break
+        
+        for name, param in self.model.named_parameters():
+            param.requires_grad = True
 
 def main():
     LOG_FORMAT = "%(asctime)s,%(msecs)-3d %(levelname)-8s [%(filename)s:%(lineno)s %(funcName)s] %(message)s"
@@ -642,20 +770,26 @@ def main():
         configs,
         parse_sys_args(),
     )
+    print(configs.model.diffusion_module.use_atom_relational_attention)
     model_name = configs.model_name
     model_specfics_configs = ConfigDict(model_configs[model_name])
     # update model specific configs
     configs.update(model_specfics_configs)
 
-    print(configs.run_name)
-    print(configs)
+    # print(configs.run_name)
+    # print(configs)
+    print(configs.model.diffusion_module.use_atom_relational_attention)
+    import pdb; pdb.set_trace()
     assert configs.global_batch_size % (torch.cuda.device_count() * configs.data.batch_size) == 0
     configs.iters_to_accumulate = int(configs.global_batch_size // torch.cuda.device_count() // configs.data.batch_size)
     print('iters_to_accumulate', configs.iters_to_accumulate)
 
     trainer = AF3Trainer(configs)
+    if configs.rel_warmup_steps > 0:
+        trainer.warmup_run()
     trainer.run()
 
 
 if __name__ == "__main__":
+    print('Start Main Function')
     main()

@@ -80,6 +80,7 @@ optim_configs = {
     "lr_scheduler": "af3",
     "warmup_steps": 10,
     "max_steps": RequiredValue(int),
+    "rel_warmup_steps": 0,
     "min_lr_ratio": 0.1,
     "decay_every_n_steps": 50000,
     "grad_clip_norm": 10,
@@ -243,6 +244,8 @@ model_configs = {
             "blocks_per_ckpt": GlobalConfigValue("blocks_per_ckpt"),
         },
         "diffusion_module": {
+            "use_atom_relational_attention": False,
+            "use_token_relational_attention": False,
             "use_fine_grained_checkpoint": True,
             "sigma_data": GlobalConfigValue("sigma_data"),
             "c_token": 768,

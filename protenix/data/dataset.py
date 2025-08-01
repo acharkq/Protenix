@@ -957,9 +957,10 @@ class WeightedMultiDataset(Dataset):
         return len(self.merged_datapoint_weights)
 
     def __getitem__(self, index: int) -> dict[str, dict]:
-        return self.datasets[self.dataset_indices[index]][
+        data = self.datasets[self.dataset_indices[index]][
             self.within_dataset_indices[index]
         ]
+        return data
 
 
 def get_weighted_pdb_weight(

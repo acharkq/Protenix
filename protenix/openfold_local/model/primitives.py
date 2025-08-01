@@ -27,25 +27,22 @@ import importlib
 import math
 import os
 from typing import Callable, List, Optional, Tuple
-
+import torch.multiprocessing as mp
 import numpy as np
 
-deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
-ds4s_is_installed = (
-    deepspeed_is_installed
-    and importlib.util.find_spec("deepspeed.ops.deepspeed4science") is not None
-)
-if deepspeed_is_installed:
-    import deepspeed
-
-if ds4s_is_installed:
-    from deepspeed.ops.deepspeed4science import DS4Sci_EvoformerAttention
-
+# deepspeed_is_installed = importlib.util.find_spec("deepspeed") is not None
+# ds4s_is_installed = (
+#     deepspeed_is_installed
+#     and importlib.util.find_spec("deepspeed.ops.deepspeed4science") is not None
+# )
+# if deepspeed_is_installed:
+#     import deepspeed
+# if ds4s_is_installed:
+#     from deepspeed.ops.deepspeed4science import DS4Sci_EvoformerAttention
 fa_is_installed = importlib.util.find_spec("flash_attn") is not None
 if fa_is_installed:
     from flash_attn.bert_padding import unpad_input
     from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
-
 fastln_is_installed = os.getenv("LAYERNORM_TYPE", None) == "fast_layernorm"
 if fastln_is_installed:
     from protenix.model.layer_norm.layer_norm import FusedLayerNorm
@@ -60,6 +57,7 @@ from protenix.openfold_local.utils.tensor_utils import (
     flatten_final_dims,
     permute_final_dims,
 )
+
 from protenix.megafold.model.FusedEvoAttention.evoattention import TritonEvoformer
 
 DEFAULT_LMA_Q_CHUNK_SIZE = 1024
