@@ -772,9 +772,10 @@ def main():
     )
     model_name = configs.model_name
     model_specfics_configs = ConfigDict(model_configs[model_name])
+    use_token_relational_attention = configs.model.diffusion_module.use_token_relational_attention
     # update model specific configs
     configs.update(model_specfics_configs)
-
+    configs.model.diffusion_module.use_token_relational_attention = use_token_relational_attention
     print(configs.run_name)
     print(configs)
     assert configs.global_batch_size % (torch.cuda.device_count() * configs.data.batch_size) == 0
