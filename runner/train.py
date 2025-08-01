@@ -765,21 +765,18 @@ def main():
     configs_base["use_deepspeed_evo_attention"] = (
         os.environ.get("USE_DEEPSPEED_EVO_ATTENTION", False) == "true"
     )
+    sys_args = parse_sys_args()
+    model_name = sys_args.get("model_name", configs_base.get('model_name'))
+
     configs = {**configs_base, **{"data": data_configs}}
-    configs = parse_configs(
-        configs,
-        parse_sys_args(),
-    )
-    print(configs.model.diffusion_module.use_atom_relational_attention)
-    model_name = configs.model_name
     model_specfics_configs = ConfigDict(model_configs[model_name])
     # update model specific configs
     configs.update(model_specfics_configs)
 
-    # print(configs.run_name)
-    # print(configs)
-    print(configs.model.diffusion_module.use_atom_relational_attention)
-    import pdb; pdb.set_trace()
+    configs = parse_configs(
+        configs,
+        sys_args,
+    )
     assert configs.global_batch_size % (torch.cuda.device_count() * configs.data.batch_size) == 0
     configs.iters_to_accumulate = int(configs.global_batch_size // torch.cuda.device_count() // configs.data.batch_size)
     print('iters_to_accumulate', configs.iters_to_accumulate)
