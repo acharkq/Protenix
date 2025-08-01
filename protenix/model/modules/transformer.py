@@ -94,6 +94,7 @@ class AttentionPairBias(nn.Module):
             q_linear_bias=True,
             local_attention_method=self.local_attention_method,
             zero_init=not self.has_s,  # Adaptive zero init
+            c_z=c_z,
             use_relational_attention=use_relational_attention,
         )
         self.layernorm_z = LayerNorm(c_z, create_offset=self.create_offset_ln_z)
