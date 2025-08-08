@@ -19,6 +19,7 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from protenix.openfold_local.utils.checkpointing import get_checkpoint_fn
 
 from protenix.model.utils import (
     flatten_final_dims,
@@ -827,10 +828,19 @@ class Attention(nn.Module):
         k = self.linear_k(kv_x)
         v = self.linear_v(kv_x)
 
-        # add pair representation; [bs, seq_len, seq_len, H * C_hidden]
-        q = q.unsqueeze(dim=2) + self.linear_qz(z) # q_ij = linear([q_i, z_ij])
-        k = k.unsqueeze(dim=1) + self.linear_kz(z) # k_ij = linear([k_j + z_ij])
-        v = v.unsqueeze(dim=1) + self.linear_vz(z) # v_ij = linear([v_j + z_ij])
+        # Use checkpoint to save memory during the memory-intensive operations
+        def _compute_qkv_with_z(q_base, k_base, v_base, z):
+            # add pair representation; [bs, seq_len, seq_len, H * C_hidden]
+            q_out = q_base.unsqueeze(dim=2) + self.linear_qz(z) # q_ij = linear([q_i, z_ij])
+            k_out = k_base.unsqueeze(dim=1) + self.linear_kz(z) # k_ij = linear([k_j + z_ij])
+            v_out = v_base.unsqueeze(dim=1) + self.linear_vz(z) # v_ij = linear([v_j + z_ij])
+            return q_out, k_out, v_out
+        
+        if self.training:
+            checkpoint = get_checkpoint_fn()
+            q, k, v = checkpoint(_compute_qkv_with_z, q, k, v, z, use_reentrant=False)
+        else:
+            q, k, v = _compute_qkv_with_z(q, k, v, z)
 
         # [bs, seq_len, seq_len, H, C_hidden]
         q = q.view(q.shape[:-1] + (self.num_heads, -1))
