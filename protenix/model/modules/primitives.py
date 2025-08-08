@@ -19,7 +19,6 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from protenix.openfold_local.utils.checkpointing import get_checkpoint_fn
 
 from protenix.model.utils import (
     flatten_final_dims,
@@ -299,10 +298,10 @@ def _relational_attention(
     """Attention.
 
     Args:
-        q (torch.Tensor): query tensor of shape [bs, seq_len, H, seq_len, C_hidden]
-        k (torch.Tensor): key tensor of shape [bs, seq_len, H, seq_len, C_hidden]
-        v (torch.Tensor): value tensor of shape [bs, seq_len, H, seq_len, C_hidden]
-        attn_bias (torch.Tensor, optional): attention bias tensor of shape [bs, H, seq_len, seq_len]. Defaults to None.
+        q (torch.Tensor): query tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        k (torch.Tensor): key tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        v (torch.Tensor): value tensor of shape [1, seq_len, H, seq_len, C_hidden]
+        attn_bias (torch.Tensor, optional): attention bias tensor of shape [1, H, seq_len, seq_len]. Defaults to None.
         use_efficient_implementation (bool): whether to use the torch.nn.functional.scaled_dot_product_attention, Defaults to False.
 
     Returns:
@@ -318,7 +317,7 @@ def _relational_attention(
         attn_bias = attn_bias.to(dtype=torch.float32)
 
     with torch.amp.autocast('cuda', enabled=False):
-        # [bs, seq_len, H, seq_len, C_hidden] [bs, seq_len, H, seq_len, C_hidden] --> [bs, seq_len, H, seq_len] --> [bs, H, seq_len, seq_len]
+        # [1, seq_len, H, seq_len, C_hidden] [1, seq_len, H, seq_len, C_hidden] --> [1, seq_len, H, seq_len] --> [1, H, seq_len, seq_len]
         attn_weights = (q * k).sum(dim=-1).transpose(-2,-3) ## attn_weights_ij = (q_ij * k_ij).sum(dim=-1)
 
         if attn_bias is not None:
@@ -327,10 +326,10 @@ def _relational_attention(
             else:
                 attn_weights = attn_weights + attn_bias
 
-        # [bs, H, seq_len, seq_len, 1]
-        attn_weights = F.softmax(attn_weights, dim=-1).unsqueeze(-1)
+        # [1, H, seq_len, seq_len, 1]
+        attn_weights = F.softmax(attn_weights, dim=-1).usqueeze(-1)
 
-    # [bs, H, seq_len, seq_len, 1], [bs, seq_len, H, seq_len, C_hidden] -> [bs, H, seq_len, C_hidden]
+    # [1, H, seq_len, seq_len, 1], [1, seq_len, H, seq_len, C_hidden] -> [1, H, seq_len, C_hidden]
     attn_output = (attn_weights.to(dtype=input_dtype) * v.transpose(-3,-4)).sum(dim=-2)
 
     return attn_output
@@ -811,43 +810,34 @@ class Attention(nn.Module):
 
         Args:
             q_x (torch.Tensor): the input x for q
-                [bs, seq_len, c_q]
+                [1, seq_len, c_q]
             kv_x (torch.Tensor): the input x for kv
-                [bs, seq_len, c_k]
-                [bs, seq_len, c_v]
+                [1, seq_len, c_k]
+                [1, seq_len, c_v]
             z (torch.Tensor): the input z
-                [bs, seq_len, seq_len, c_z]
+                [1, seq_len, seq_len, c_z]
             apply_scale (bool, optional): apply scale to dot product qk. Defaults to True.
 
         Returns:
             tuple[torch.Tensor, torch.Tensor, torch.Tensor]: the return q/k/v
                 # [..., H, Q/K/V, C_hidden]
         """
-        # [bs, seq_len, H * C_hidden]
+        # [1, seq_len, H * C_hidden]
         q = self.linear_q(q_x)
         k = self.linear_k(kv_x)
         v = self.linear_v(kv_x)
 
-        # Use checkpoint to save memory during the memory-intensive operations
-        def _compute_qkv_with_z(q_base, k_base, v_base, z):
-            # add pair representation; [bs, seq_len, seq_len, H * C_hidden]
-            q_out = q_base.unsqueeze(dim=2) + self.linear_qz(z) # q_ij = linear([q_i, z_ij])
-            k_out = k_base.unsqueeze(dim=1) + self.linear_kz(z) # k_ij = linear([k_j + z_ij])
-            v_out = v_base.unsqueeze(dim=1) + self.linear_vz(z) # v_ij = linear([v_j + z_ij])
-            return q_out, k_out, v_out
-        
-        if self.training:
-            checkpoint = get_checkpoint_fn()
-            q, k, v = checkpoint(_compute_qkv_with_z, q, k, v, z, use_reentrant=False)
-        else:
-            q, k, v = _compute_qkv_with_z(q, k, v, z)
+        # add pair representation; [1, seq_len, seq_len, H * C_hidden]
+        q = q.unsqueeze(dim=2) + self.linear_qz(z) # q_ij = linear([q_i, z_ij])
+        k = k.unsqueeze(dim=1) + self.linear_kz(z) # k_ij = linear([k_j + z_ij])
+        v = v.unsqueeze(dim=1) + self.linear_vz(z) # v_ij = linear([v_j + z_ij])
 
-        # [bs, seq_len, seq_len, H, C_hidden]
+        # [1, seq_len, seq_len, H, C_hidden]
         q = q.view(q.shape[:-1] + (self.num_heads, -1))
         k = k.view(k.shape[:-1] + (self.num_heads, -1))
         v = v.view(v.shape[:-1] + (self.num_heads, -1))
 
-        # [bs, seq_len, H, seq_len, C_hidden]
+        # [1, seq_len, H, seq_len, C_hidden]
         q = q.transpose(-2, -3)
         k = k.transpose(-2, -3)
         v = v.transpose(-2, -3)
