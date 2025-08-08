@@ -918,7 +918,7 @@ class Attention(nn.Module):
         if self.use_relational_attention:
             seq_len = q_x.shape[1]
             q, k, v = self._prep_qkvz(q_x=q_x, kv_x=kv_x, z=z, apply_scale=True) # shape = [bs, seq_len, H, seq_len, C_hidden]
-            if not (attn_bias is not None and (attn_bias.shape == (1, self.num_heads, seq_len, seq_len) or attn_bias.shape == (2, self.num_heads, seq_len, seq_len))):
+            if not attn_bias is not None: # and (attn_bias.shape == (1, self.num_heads, seq_len, seq_len) or attn_bias.shape == (2, self.num_heads, seq_len, seq_len))):
                 import traceback
                 print("=== CALL STACK ===")
                 traceback.print_stack()
