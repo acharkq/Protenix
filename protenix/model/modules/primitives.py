@@ -327,7 +327,7 @@ def _relational_attention(
                 attn_weights = attn_weights + attn_bias
 
         # [1, H, seq_len, seq_len, 1]
-        attn_weights = F.softmax(attn_weights, dim=-1).usqueeze(-1)
+        attn_weights = F.softmax(attn_weights, dim=-1).unsqueeze(-1)
 
     # [1, H, seq_len, seq_len, 1], [1, seq_len, H, seq_len, C_hidden] -> [1, H, seq_len, C_hidden]
     attn_output = (attn_weights.to(dtype=input_dtype) * v.transpose(-3,-4)).sum(dim=-2)
@@ -906,9 +906,10 @@ class Attention(nn.Module):
                 [*, Q, C_q]
         """
         if self.use_relational_attention:
-            seq_len = q_x.shape[0]
+            seq_len = q_x.shape[1]
             q, k, v = self._prep_qkvz(q_x=q_x, kv_x=kv_x, z=z, apply_scale=True) # shape = [1, seq_len, H, seq_len, C_hidden]
-            assert attn_bias is not None and attn_bias.shape == (1, self.num_heads, seq_len, seq_len)
+            if not (attn_bias is not None and attn_bias.shape == (1, self.num_heads, seq_len, seq_len)):
+                import pdb; pdb.set_trace()
             o = _relational_attention(q=q,k=k,v=v,inplace_safe=inplace_safe) # shape = [1, H, seq_len, C_hidden]
             o = o.transpose(-2, -3)  # o: [1, seq_len, H, C_hidden]
             o = self._wrap_up(o, q_x)  # q_x: [1, Q, c_q]
