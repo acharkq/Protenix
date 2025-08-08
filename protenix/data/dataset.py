@@ -991,9 +991,10 @@ def get_weighted_pdb_weight(
         }
     if not alpha_dict:
         alpha_dict = {
-            "prot": 3,
-            "nuc": 3,
-            "ligand": 1,
+            "prot": 0,
+            "rna": 3,
+            "dna": 0,
+            "ligand": 0,
         }
 
     assert cluster_size > 0
@@ -1046,8 +1047,8 @@ def calc_weights_for_df(
     for _, row in indices_df.iterrows():
         data_type = row["type"]
         cluster_size = cluster_size_record[row["cluster_id"]]
-        chain_count = {"prot": 0, "nuc": 0, "ligand": 0}
-        for mol_type in [row["mol_1_type"], row["mol_2_type"]]:
+        chain_count = {"prot": 0, "rna": 0,"dna":0, "ligand": 0}
+        for mol_type in [row["sub_mol_1_type"], row["sub_mol_2_type"]]:
             if chain_count.get(mol_type) is None:
                 continue
             chain_count[mol_type] += 1
@@ -1072,9 +1073,10 @@ def get_sample_weights(
         "interface": 1,
     },
     alpha_dict: dict = {
-        "prot": 3,
-        "nuc": 3,
-        "ligand": 1,
+        "prot": 0,
+        "rna": 3,
+        "dna": 0,
+        "ligand": 0,
     },
     force_recompute_weight: bool = False,
 ) -> Union[pd.Series, list[float]]:

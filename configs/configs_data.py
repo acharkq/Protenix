@@ -47,9 +47,10 @@ default_weighted_pdb_configs = {
             "interface": 1,
         },
         "alpha_dict": {
-            "prot": 3,
-            "nuc": 3,
-            "ligand": 1,
+            "prot": 0,
+            "rna": 3,
+            "dna": 0,
+            "ligand": 0,
         },
         "force_recompute_weight": True,
     },
