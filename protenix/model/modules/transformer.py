@@ -187,7 +187,6 @@ class AttentionPairBias(nn.Module):
         # Multi-head attention bias
         bias = self.linear_nobias_z(self.layernorm_z(z))
         bias = permute_final_dims(bias, [2, 0, 1])  # [..., n_heads, N_token, N_token]
-
         # Line 11: Multi-head attention with attention bias & gating (and optionally local attention)
         q = self.attention(q_x=q, kv_x=kv, z=z, attn_bias=bias, inplace_safe=inplace_safe)
 
